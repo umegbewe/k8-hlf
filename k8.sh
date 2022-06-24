@@ -78,9 +78,9 @@ ca() {
 }
 
 peer() {
-    kubectl hlf peer create --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=standard --enroll-id=peer --mspid=$MSP_ORG \
+    kubectl hlf peer create --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=$STORAGE_CLASS --enroll-id=peer --mspid=$MSP_ORG \
         --enroll-pw=$PEER_SECRET --capacity=5Gi --name=$ORG-peer0 --ca-name=$ORG-ca.$NAMESPACE
-    kubectl hlf peer create --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=standard --enroll-id=peer --mspid=$MSP_ORG \
+    kubectl hlf peer create --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=$STORAGE_CLASS --enroll-id=peer --mspid=$MSP_ORG \
         --enroll-pw=$PEER_SECRET --capacity=5Gi --name=$ORG-peer1 --ca-name=$ORG-ca.$NAMESPACE
         
     while [[ $(kubectl get pods -l app=hlf-peer --output=jsonpath='{.items[*].status.containerStatuses[0].ready}') != "true true" ]]; do 
@@ -103,7 +103,7 @@ orderer() {
     
     
     kubectl hlf ordnode create --image=$ORDERER_IMAGE --version=$ORDERER_VERSION \
-    --storage-class=standard --enroll-id=$ORD --mspid=$MSP_ORD \
+    --storage-class=$STORAGE_CLASS --enroll-id=$ORD --mspid=$MSP_ORD \
     --enroll-pw=$ORDERER_SECRET --capacity=2Gi --name=$ORD-node1 --ca-name=$ORD-ca.$NAMESPACE
     
     while [[ $(kubectl get pods -l app=hlf-ordnode -o 'jsonpath={..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do
@@ -145,7 +145,7 @@ connect() {
     
     kubectl hlf channel join --name=$CHANNEL --config=org1.yaml --user=admin -p=$ORG-peer0.$NAMESPACE && \
 
-    kubectl hlf channel addanchorpeer --channel=demo --config=org1.yaml --user=admin --peer=$ORG-peer0.$NAMESPACE
+    kubectl hlf channel addanchorpeer --channel=$CHANNEL --config=org1.yaml --user=admin --peer=$ORG-peer0.$NAMESPACE
     
     kubectl hlf channel join --name=$CHANNEL --config=org1.yaml --user=admin -p=$ORG-peer1.$NAMESPACE
 }
