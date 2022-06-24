@@ -2,9 +2,6 @@
 
 set -e
 
-
-source ./chaincode.sh
-
 # global variables
 
 BLUE="$(printf '\033[34m')"
@@ -28,6 +25,8 @@ ORDERER_VERSION=2.4.3
 ORDERER_SECRET=ordererpw
 
 CHANNEL=my-channel1
+CHAINCODE_NAME=chaincode1
+CHAINCODE_LABEL=chaincode1
 
 STORAGE_CLASS=$(kubectl describe sc | grep Name | tr -s ' ' | cut -d ':' -f 2 | cut -d ' ' -f 2)
 ID=enroll
@@ -78,6 +77,9 @@ ca() {
 }
 
 peer() {
+    
+    sleep 10
+    
     kubectl hlf peer create --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=$STORAGE_CLASS --enroll-id=peer --mspid=$MSP_ORG \
         --enroll-pw=$PEER_SECRET --capacity=5Gi --name=$ORG-peer0 --ca-name=$ORG-ca.$NAMESPACE
     kubectl hlf peer create --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=$STORAGE_CLASS --enroll-id=peer --mspid=$MSP_ORG \
@@ -150,6 +152,29 @@ connect() {
     kubectl hlf channel join --name=$CHANNEL --config=org1.yaml --user=admin -p=$ORG-peer1.$NAMESPACE
 }
 
+generateChaincode() {
+
+cat << METADATA-EOF > "metadata.json"
+{
+    "type": "ccaas",
+    "label": "${CHAINCODE_LABEL}"
+}
+METADATA-EOF
+
+cat > "connection.json" <<CONN_EOF
+{
+  "address": "${CHAINCODE_NAME}:7052",
+  "dial_timeout": "10s",
+  "tls_required": false
+}
+CONN_EOF
+
+tar cfz code.tar.gz connection.json
+tar cfz asset-transfer-basic-external.tgz metadata.json code.tar.gz
+export PACKAGE_ID=$(kubectl hlf chaincode calculatepackageid --path=asset-transfer-basic-external.tgz --language=golang --label=$CHAINCODE_LABEL)
+echo "PACKAGE_ID=$PACKAGE_ID" 
+}
+
 
 chaincode() {
     generateChaincode
@@ -159,15 +184,26 @@ chaincode() {
     
     kubectl hlf chaincode install --path=./asset-transfer-basic-external.tgz \
     --config=org1.yaml --language=golang --label=$CHAINCODE_LABEL --user=admin --peer=$ORG-peer1.$NAMESPACE
+
+    kubectl hlf externalchaincode sync --image=kfsoftware/chaincode-external:latest \
+        --name=$CHAINCODE_NAME \
+        --namespace=$NAMESPACE \
+        --package-id=$PACKAGE_ID \
+        --tls-required=false \
+        --replicas=1
     
     kubectl hlf chaincode approveformyorg --config=org1.yaml --user=admin --peer=$ORG-peer0.$NAMESPACE \
     --package-id=$PACKAGE_ID --version "$VERSION" --sequence "$SEQUENCE" --name=$CHAINCODE_NAME \
     --policy="OR('Org1MSP.member')" --channel=$CHANNEL
     
+    sleep 10
+    
     kubectl hlf chaincode commit --config=org1.yaml --user=admin --mspid=$MSP_ORG \
     --version "$VERSION" --sequence "$SEQUENCE" --name=$CHAINCODE_NAME \
     --policy="OR('Org1MSP.member')" --channel=$CHANNEL
+
 }
+
 
 if [ "$1" = "up" ]; then
     up
