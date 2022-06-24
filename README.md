@@ -2,7 +2,9 @@
 
 Script to automate setting up a simple hyperledger fabric with [hlf-operator](https://github.com/hyperledger-labs/hlf-operator)
 
-Executed:
+PS: The script assumes you have a kubernetes cluster and the [hlf plugin](https://github.com/hyperledger-labs/hlf-operator#installing-the-kubectl-hlf-plugin) setup 
+
+#### Executed:
 
 * Ordering service with a node and a CA
 * Peer organization with 2 peer both using levelDB and a CA
