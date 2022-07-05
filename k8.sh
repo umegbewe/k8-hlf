@@ -1,9 +1,14 @@
+
+
 #!/bin/bash
 
 set -e
 
+
+
 # global variables
 
+RESETBG="$(printf '\e[0m\n')"
 BLUE="$(printf '\033[34m')"
 
 NAMESPACE=default
@@ -16,8 +21,8 @@ ORD=orderer
 MSP_ORG=Org1MSP
 MSP_ORD=OrdererMSP
 
-PEER_IMAGE=hyperledger/fabric-peer
-PEER_VERSION=2.4.3
+PEER_IMAGE=quay.io/kfsoftware/fabric-peer
+PEER_VERSION=2.4.1-v0.0.3
 PEER_SECRET=peerpw
 
 ORDERER_IMAGE=hyperledger/fabric-orderer
@@ -58,7 +63,7 @@ helm install hlf-operator --version=1.6.0 kfs/hlf-operator
 
 while [ "$(kubectl get pods -l=app.kubernetes.io/name=hlf-operator -o jsonpath='{.items[*].status.containerStatuses[0].ready}')" != "true" ]; do
    sleep 5
-   echo $BLUE "Waiting for Operator to be ready."
+   echo $BLUE "Waiting for Operator to be ready." $RESETBG
 done
 }
 
@@ -69,11 +74,11 @@ ca() {
 
     while [[ $(kubectl get pods -l release=$ORG-ca -o 'jsonpath={..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do 
         sleep 5 
-        echo $BLUE "waiting for CA" 
+        echo $BLUE "waiting for CA" $RESETBG
     done
 
     kubectl hlf ca register --name=$ORG-ca --user=peer --secret=$PEER_SECRET --type=peer --enroll-id $ID --enroll-secret=$SECRET --mspid $MSP_ORG && \
-    echo $BLUE "registered $ORG-ca" 
+    echo $BLUE "registered $ORG-ca"  $RESETBG
 }
 
 peer() {
@@ -81,13 +86,13 @@ peer() {
     sleep 10
     
     kubectl hlf peer create --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=$STORAGE_CLASS --enroll-id=peer --mspid=$MSP_ORG \
-        --enroll-pw=$PEER_SECRET --capacity=5Gi --name=$ORG-peer0 --ca-name=$ORG-ca.$NAMESPACE
+        --enroll-pw=$PEER_SECRET --capacity=5Gi --name=$ORG-peer0 --ca-name=$ORG-ca.$NAMESPACE --k8s-builder=true --external-service-builder=false
     kubectl hlf peer create --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=$STORAGE_CLASS --enroll-id=peer --mspid=$MSP_ORG \
-        --enroll-pw=$PEER_SECRET --capacity=5Gi --name=$ORG-peer1 --ca-name=$ORG-ca.$NAMESPACE
+        --enroll-pw=$PEER_SECRET --capacity=5Gi --name=$ORG-peer1 --ca-name=$ORG-ca.$NAMESPACE --k8s-builder=true --external-service-builder=false
         
     while [[ $(kubectl get pods -l app=hlf-peer --output=jsonpath='{.items[*].status.containerStatuses[0].ready}') != "true true" ]]; do 
         sleep 5
-        echo $BLUE "waiting for peer nodes to be ready" 
+        echo $BLUE "waiting for peer nodes to be ready" $RESETBG
     done
     
 }
@@ -97,11 +102,11 @@ orderer() {
 
     while [[ $(kubectl get pods -l release=$ORD-ca -o 'jsonpath={..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do
         sleep 5
-        echo $BLUE "waiting for $ORD CA to be ready"
+        echo $BLUE "waiting for $ORD CA to be ready" $RESETBG
     done
 
     kubectl hlf ca register --name=$ORD-ca --user=orderer --secret=$ORDERER_SECRET --type=orderer --enroll-id $ID --enroll-secret=$SECRET --mspid $MSP_ORD && \
-    echo $BLUE "registered $ORD-ca"
+    echo $BLUE "registered $ORD-ca" $RESETBG
     
     
     kubectl hlf ordnode create --image=$ORDERER_IMAGE --version=$ORDERER_VERSION \
@@ -126,15 +131,21 @@ admin() {
 }
 
 channel() {
+    sleep 10
+
     kubectl hlf channel generate --output=$CHANNEL.block --name=$CHANNEL --organizations $MSP_ORG --ordererOrganizations $MSP_ORD && \
     
     kubectl hlf ca enroll --name=$ORD-ca --namespace=$NAMESPACE --user=admin --secret=$SECRET --mspid $MSP_ORD --ca-name tlsca --output admin-tls-ordservice.yaml && \
+
+    sleep 10
     
     kubectl hlf ordnode join --block=$CHANNEL.block --name=$ORD-node1 --namespace=$NAMESPACE --identity=admin-tls-ordservice.yaml
     
 }
 
 connect() {
+    sleep 10
+
     kubectl hlf ca register --name=$ORG-ca --user=admin --secret=$SECRET --type=admin --enroll-id $ID --enroll-secret=$SECRET --mspid $MSP_ORG && \
     
     kubectl hlf ca enroll --name=$ORG-ca --user=admin --secret=$SECRET --mspid $MSP_ORG --ca-name ca  --output peer-org1.yaml && \
@@ -152,39 +163,23 @@ connect() {
     kubectl hlf channel join --name=$CHANNEL --config=org1.yaml --user=admin -p=$ORG-peer1.$NAMESPACE
 }
 
-generateChaincode() {
-
-cat << METADATA-EOF > "metadata.json"
-{
-    "type": "ccaas",
-    "label": "${CHAINCODE_LABEL}"
-}
-METADATA-EOF
-
-cat > "connection.json" <<CONN_EOF
-{
-  "address": "${CHAINCODE_NAME}:7052",
-  "dial_timeout": "10s",
-  "tls_required": false
-}
-CONN_EOF
-
-tar cfz code.tar.gz connection.json
-tar cfz asset-transfer-basic-external.tgz metadata.json code.tar.gz
-export PACKAGE_ID=$(kubectl hlf chaincode calculatepackageid --path=asset-transfer-basic-external.tgz --language=golang --label=$CHAINCODE_LABEL)
-echo "PACKAGE_ID=$PACKAGE_ID" 
-}
-
 
 chaincode() {
-    generateChaincode
-    
-    kubectl hlf chaincode install --path=./asset-transfer-basic-external.tgz \
-    --config=org1.yaml --language=golang --label=$CHAINCODE_LABEL --user=admin --peer=$ORG-peer0.$NAMESPACE
-    
-    kubectl hlf chaincode install --path=./asset-transfer-basic-external.tgz \
-    --config=org1.yaml --language=golang --label=$CHAINCODE_LABEL --user=admin --peer=$ORG-peer1.$NAMESPACE
 
+    echo $BLUE "Installing chaincode on $ORG-peer0" $RESETBG
+    
+    kubectl hlf chaincode install --path=./chaincode/fabcar/go \
+    --config=org1.yaml --language=golang --label=$CHAINCODE_LABEL --user=admin --peer=$ORG-peer0.$NAMESPACE
+
+    echo $BLUE "Installing chaincode on $ORG-peer1" $RESETBG
+    
+    kubectl hlf chaincode install --path=./chaincode/fabcar/javascript \
+    --config=org1.yaml --language=node --label=$CHAINCODE_LABEL --user=admin --peer=$ORG-peer1.$NAMESPACE
+
+
+    PACKAGE_ID=$(kubectl hlf chaincode queryinstalled --config=org1.yaml --user=admin --peer=org1-peer0.default | awk '{print $1}' | grep chaincode)
+
+    echo $BLUE "Deploying Chaincode" $RESETBG
     kubectl hlf externalchaincode sync --image=kfsoftware/chaincode-external:latest \
         --name=$CHAINCODE_NAME \
         --namespace=$NAMESPACE \
@@ -192,12 +187,12 @@ chaincode() {
         --tls-required=false \
         --replicas=1
     
+    echo $BLUE "Approving Chaincode" $RESETBG
     kubectl hlf chaincode approveformyorg --config=org1.yaml --user=admin --peer=$ORG-peer0.$NAMESPACE \
     --package-id=$PACKAGE_ID --version "$VERSION" --sequence "$SEQUENCE" --name=$CHAINCODE_NAME \
     --policy="OR('Org1MSP.member')" --channel=$CHANNEL
     
-    sleep 10
-    
+    echo $BLUE "Committing Chaincode" $RESETBG
     kubectl hlf chaincode commit --config=org1.yaml --user=admin --mspid=$MSP_ORG \
     --version "$VERSION" --sequence "$SEQUENCE" --name=$CHAINCODE_NAME \
     --policy="OR('Org1MSP.member')" --channel=$CHANNEL
